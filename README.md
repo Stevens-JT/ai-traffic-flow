@@ -1,82 +1,77 @@
-# Traffic Flow Forecasting Using Physics-Based and Hybrid Machine Learning Models
+# Short-Term Traffic Forecasting with Physics-Based and Hybrid Models
 
-A graduate research project for COMP 841 comparing a Cell Transmission Model (CTM), Temporal Ridge Regression (TRR), and a hybrid model that learns corrections to CTM outputs. The project explores whether traffic conservation dynamics and statistical learning from multiple highway detectors can complement each other in short-term speed and flow forecasting.
+Graduate research for COMP 841 investigating traffic flow and speed forecasting with a **Cell Transmission Model (CTM)**, **Temporal Ridge Regression (TRR)**, and **hybrid residual learning**. The study considers nominal **5-, 15-, and 30-minute prediction horizons** using historical measurements from five traffic stations.
 
-The implementation is an academic Python/Jupyter and MATLAB prototype. Saved experiments, rather than a deployed service, are the primary artifacts. **TRR outperforms persistence on the saved six-step test evaluation; hybrid and CTM conclusions remain provisional because of alignment and evaluation issues documented below.**
+The research asks whether a statistical model can improve a physics-based forecast by learning its systematic errors. Short-term traffic prediction provides useful context for transportation planning and autonomous systems operating in changing traffic conditions. This repository is a research prototype in Python/Jupyter and MATLAB, with saved experiments and comparative evaluations.
 
-## Research objectives
+**My contributions:** Python TRR implementation, temporal and multi-station feature engineering, ridge-based residual-learning experiments, and comparative evaluation of flow and speed forecasts. **A research colleague implemented the original MATLAB CTM.** The work combines numerical modeling, time-series feature construction, regularized machine learning, and analysis of model performance across stations.
 
-Forecast speed and flow across five detector stations, compare physics-based and temporal statistical models, and investigate residual learning as a way to correct physics-model errors. Start with the [TRR notebook](TRR_Hybrid_models_code/AItrafficFlowTRR.ipynb), then inspect the [hybrid notebook](TRR_Hybrid_models_code/AItrafficFlowHybrid.ipynb) and [MATLAB implementation](MATLAB%20Code%20CTM/README.md).
+## Model architecture
 
-## Methodology
+All three approaches predict station-level flow and speed, but use measurements differently:
 
-**CTM.** Five cells use a triangular fundamental diagram with demand $D_i=\min(v_f k_i,q_{max})$, supply $S_i=\max(0,\min(q_{max},w(k_j-k_i)))$, and interface flow $F_{i+1/2}=\min(D_i,S_{i+1})$. Density follows conservation:
+| Model | Inputs and approach | Role in the study |
+|---|---|---|
+| CTM (MATLAB) | Traffic measurements initialize a discretized conservation model with a triangular fundamental diagram; demand and supply constrain flow between cells. | Physics-based forecast baseline. |
+| TRR (Python) | Historical flow and speed across five stations form standardized lag features; separate multi-output ridge regressions predict future flow and speed. | Standalone statistical forecast. |
+| Hybrid CTM + TRR (Python) | Ridge regressions use the lag features to learn the difference between observations and supplied CTM forecasts. Predicted corrections are added to CTM outputs. | Investigates whether learned corrections improve physics-based forecasts. |
 
-$$k_i^{n+1}=k_i^n+\frac{\Delta t}{\Delta x}(F_{i-1/2}-F_{i+1/2}).$$
+For either flow or speed, the hybrid formulation is:
 
-Cells are 0.6 km long; 60 five-second integration steps represent each nominal five-minute observation interval. MATLAB calibrates parameters with constrained `fmincon`, minimizing $0.5\,RMSE_{speed}/120+0.5\,RMSE_{flow}/8000$. Calibration simulation averages interval outputs and blends past observed speed into modeled speed; forecasting instead initializes density from current measurements and returns final-step outputs. See [implementation details and caveats](docs/RESEARCH_AUDIT.md).
+$$r_{t+h}=y_{t+h}-\hat y^{CTM}_{t+h}, \qquad
+\hat y^{hybrid}_{t+h}=\hat y^{CTM}_{t+h}+\hat r_{t+h}(X_t).$$
 
-**TRR.** Pivot flow and speed across five stations; concatenate lags 0–5 of both variables into 60 features. This includes the current measurement and five preceding rows, spanning 25 minutes on a regular grid. Separate multi-output ridge models predict flow and speed six rows ahead:
+During training, observations and CTM predictions define the residual targets. At inference, the residual model uses measured history to estimate a correction to the CTM forecast. The standalone TRR instead predicts the target directly from the same type of history. Correct station and forecast-target alignment is necessary for both training and evaluation.
 
-$$\min_{W,b}\|Y-XW-\mathbf{1}b^T\|_F^2+\alpha\|W\|_F^2.$$
+The saved Python configuration uses flow and speed at lags 0–5 across five stations: **60 features**, including the current measurement and five preceding rows. On a regular five-minute grid, these inputs span 25 minutes. Separate ridge penalties for flow and speed are selected through four expanding-window date folds. A persistence baseline predicts that each station's current measurement remains unchanged.
 
-Features are standardized; the intercept is unpenalized. Seven regularization values from $10^{-4}$ to $10^2$ are searched independently for each variable. Both saved selections are 100.
+## Experiments and originally reported results
 
-**Hybrid.** Using the same lag features, train separate ridge models on $r=Y-\hat Y_{CTM}$ and reconstruct $\hat Y_{hybrid}=\hat Y_{CTM}+\hat r$. The notebook intersects CTM export timestamps with feature indices. The indices still represent forecast origins after target shifting, so this intersection needs a target-time audit before treating the result as a validated hybrid forecast.
+The supplied detector extracts are described in the original documentation as US-101 data. Training covers eight observed dates in June 2005; testing covers June 20–22. The notebooks use separate training and test files. The original data acquisition and extraction procedure is not included.
 
-## Experimental design and validation
+`DELTA = 1, 3, 6` represents nominal 5-, 15-, and 30-minute horizons. The saved fitted notebook evaluations below use `DELTA = 6`. Other horizon comparisons appear as manually entered plotting arrays, rather than a complete saved automated sweep. Row shifts cross missing records and date gaps, so six rows ahead is not always 30 minutes of elapsed time.
 
-The supplied detector extracts are described by the original documentation as US-101 data. They contain station IDs `717486`, `764766`, `717488`, `717489`, `717490`; geographic ordering, original download source, and extraction procedure are not supplied. Training covers eight observed dates, June 8–10 and 13–17, 2005 (11,495 station rows); testing covers June 20–22 (4,243 rows). Both notebooks use separate train/test files.
+These are **originally reported results**, preserved in the saved [TRR notebook](TRR_Hybrid_models_code/AItrafficFlowTRR.ipynb) and [hybrid notebook](TRR_Hybrid_models_code/AItrafficFlowHybrid.ipynb). Metrics are means of the five per-station RMSEs, rather than pooled RMSE.
 
-Four expanding-window folds train on the first four dates and validate on the fifth, then expand through the eighth date. The CV score averages fold RMSE computed over all station outputs. Final notebook metrics instead average the five per-station RMSEs. Persistence predicts each station’s current measurement at the future target.
+| Model | Test forecast origins | Flow RMSE (veh/h) | Speed RMSE (km/h) |
+|---|---:|---:|---:|
+| Standalone TRR | 837 | 818.91 | 8.19 |
+| Hybrid CTM + TRR | 833 | 799.50 | 9.89 |
+| Persistence | 837 | 880.31 | 8.79 |
 
-`DELTA` values 1, 3 and 6 nominally mean 5, 15 and 30 minutes. The saved fitted notebook evaluations use **6**. Row shifts cross gaps, including the missing weekend, so elapsed horizons are not uniformly 30 minutes. Other horizon plots use manually entered arrays rather than a saved automated sweep.
+**The hybrid demonstrated lower reported flow RMSE than standalone TRR, while standalone TRR was preferable for speed prediction in the original comparison.** TRR also had lower average flow and speed RMSE than persistence on their shared evaluation, although it did not outperform persistence at every station.
 
-Confirmed safeguards: test data are excluded from scaler fitting and model tuning; fold origins are chronological. Limitations: scaling is fitted on all training dates before CV, future target times are not purged across fold boundaries, and sampling continuity is not enforced. Thus the CV is not fully isolated against temporal leakage. [Full audit](docs/RESEARCH_AUDIT.md) records these issues without changing the experiments.
+The original hybrid and TRR scores use different subsets, and CTM export alignment remains unresolved. Their reported ranking is therefore an experimental finding with qualifications, rather than a verified comparison on identical targets. No standalone CTM RMSE is presented as a validated future-target score; see the limitations below and the [research audit](docs/RESEARCH_AUDIT.md).
 
-## Results
+### Supplementary external validation — artifacts pending inclusion
 
-Values below are recovered from saved printed outputs, rounded to four decimals. Flow and speed are reported separately; these are means of per-station RMSEs, not pooled RMSE.
+A separate, externally conducted Python reconstruction of CTM forecasts and residual learning was reported to yield approximately **819.00 veh/h** flow RMSE for standalone TRR and **802.81 veh/h** for the reconstructed hybrid on the same **833 test observations**, an approximately **1.98% reduction**.
 
-| Evaluation | Model | Test origins | Flow RMSE (veh/h) | Speed RMSE (km/h) |
-|---|---|---:|---:|---:|
-| Same six-row-ahead targets | TRR | 837 | 818.9118 | 8.1883 |
-| Same six-row-ahead targets | Persistence | 837 | 880.3109 | 8.7941 |
-| Separate subset; alignment unresolved | Hybrid CTM + TRR | 833 | 799.4998 | 9.8948 |
-| No validated comparable forecast evaluation | CTM | — | — | — |
+Supporting reconstruction scripts and outputs are **not present in this repository**. These supplementary figures have not been independently verified from the checked-in artifacts and are pending inclusion; they are separate from the original saved notebook results. The reported improvement is specific to that experiment and does not establish generalization to other datasets or traffic conditions.
 
-TRR has lower mean errors than persistence for both variables on their shared evaluation. It does not win at every station: persistence has lower speed RMSE at the first three stations. The hybrid’s smaller reported flow error does **not** establish an improvement over TRR, because the rows differ and CTM timing needs verification and export ground-truth station labels disagree with raw detector IDs (see the audit). MATLAB forecast scoring compares predictions to current rather than future observations, and no saved MATLAB evaluation log is included. CTM CSVs alone do not resolve this discrepancy.
-
-Python uses `mph × 1.6`; MATLAB and supplied CTM ground-truth columns use `mph × 1.60934`. Both are labeled km/h, but the conversion difference also affects residual learning.
-
-## Visualizations
+## Example predictions
 
 ![Saved TRR speed and flow predictions for five stations](figures/trr_saved_predictions.png)
 
-Exported directly from the saved TRR notebook’s **Multi-Station Prediction Plot**, without rerunning the experiment. Left: speed (km/h); right: flow (veh/h), June 20, 2005. The x-axis shows forecast-origin timestamps; target values are six rows ahead. The hybrid notebook’s analogous plot is mislabeled: its code plots standalone TRR predictions. Hard-coded horizon charts are retained in the notebooks but are not used here as verified experimental evidence.
+Saved TRR notebook output for June 20, 2005: speed on the left and flow on the right. The x-axis shows forecast-origin timestamps; targets are six rows ahead. This figure was extracted from saved output without rerunning the experiment. The hybrid notebook's analogous plot uses standalone TRR prediction variables despite its legend; it should not be treated as evidence of hybrid trajectories.
 
-## Repository structure
+## Repository navigation
 
-```text
-.
-├── README.md
-├── docs/RESEARCH_AUDIT.md          # Evidence, limitations, cleanup and checks
-├── figures/trr_saved_predictions.png
-├── TRR_Hybrid_models_code/
-│   ├── AItrafficFlowTRR.ipynb      # TRR and persistence evaluations
-│   ├── AItrafficFlowHybrid.ipynb   # CTM residual learning and comparisons
-│   ├── README.md                  # Python reproduction notes
-│   ├── requirements.txt           # Existing pinned environment
-│   ├── *_split_for_ctm.csv        # Detector extracts
-│   ├── ctm_outputs*.csv           # Supplied physics outputs
-│   └── FAQ_revised.docx           # Original submission FAQ; see audit caveats
-├── MATLAB Code CTM/               # Calibration, simulation, forecast and data
-└── archive/                       # Distinct historical checkpoint notebooks
-```
+| Location | Contents |
+|---|---|
+| [TRR notebook](TRR_Hybrid_models_code/AItrafficFlowTRR.ipynb) | Feature engineering, ridge tuning, standalone forecasts, persistence comparison, and saved results. |
+| [Hybrid notebook](TRR_Hybrid_models_code/AItrafficFlowHybrid.ipynb) | Residual learning from supplied CTM exports and model comparisons. |
+| [Python guide](TRR_Hybrid_models_code/README.md) | Input filenames, working directory, and execution details. |
+| [Python requirements](TRR_Hybrid_models_code/requirements.txt) | Pinned numerical, machine-learning, plotting, and Jupyter dependencies. |
+| [MATLAB CTM](MATLAB%20Code%20CTM/README.md) | Colleague's calibration, simulation, and forecasting implementation with detector inputs. |
+| [Research audit](docs/RESEARCH_AUDIT.md) | Evidence for saved metrics, alignment findings, and detailed methodological considerations. |
+| [Archive](archive/README.md) | Historical notebook variants; use the current notebooks above as entry points. |
 
-## Installation and reproduction
+`TRR_Hybrid_models_code/` includes the detector training/test CSVs, a CTM training export, and CTM test exports labeled D1, D3, and D6. The original training-export procedure is absent; the checked-in MATLAB scripts do not generate the residual-learning CSVs end to end.
 
-From the repository root, create a Python environment (Python 3.12 was specified by the original setup instructions):
+## Running the Python notebooks
+
+The existing setup documentation specifies Python 3.12. From the repository root:
 
 ```bash
 python3.12 -m venv .venv
@@ -86,18 +81,17 @@ cd TRR_Hybrid_models_code
 jupyter lab
 ```
 
-On Windows PowerShell activate with `.venv\Scripts\Activate.ps1`. Open either notebook and select the environment’s kernel. Inspect saved results without execution, or explicitly run cells top to bottom to repeat that experiment. Keep the working directory here so relative CSV paths resolve. See the [Python guide](TRR_Hybrid_models_code/README.md) for inputs and optional execution commands. Changing `DELTA` requires a corresponding CTM export and verified alignment; the training export has no horizon identifier.
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. Open `AItrafficFlowTRR.ipynb` first, then `AItrafficFlowHybrid.ipynb`, and select the environment's Python kernel. Run cells from top to bottom. Launching Jupyter from this directory allows the notebooks' relative CSV paths to resolve. Saved outputs can also be inspected without execution.
 
-For MATLAB, use the [MATLAB guide](MATLAB%20Code%20CTM/README.md). `main_forecast.m` uses fixed parameters and defaults to `Delta = 1`; calibration requires Optimization Toolbox. There is a filename issue in calibration and unresolved forecast target indexing. The checked-in scripts do not export the CTM CSVs used by Python.
+The requirements already include NumPy, pandas, SciPy, scikit-learn, Matplotlib, seaborn, JupyterLab, Notebook, and ipykernel. No additional Python dependency is prescribed here. The hybrid notebook reads the supplied CTM CSVs; rerunning the original MATLAB exporter is not an available prerequisite. Changing the hybrid horizon requires a matching test export and verification of the unversioned training export's horizon and timestamp semantics.
 
-All current input CSVs are included. No clean-environment installation, notebook execution, or MATLAB experiment was performed during this presentation update; full reproducibility is **not established**.
+These instructions reflect the checked-in setup and notebook imports. A fresh environment installation and full notebook execution were not performed for this README update, so end-to-end reproducibility is not established. For MATLAB prerequisites and known execution issues, consult the [MATLAB guide](MATLAB%20Code%20CTM/README.md).
 
-## Limitations and future work
+## Limitations and next steps
 
-This research prototype covers a small detector extract and a short temporal holdout; generalization to other roads, seasons, or traffic regimes is untested. CTM assumes uniform cells, a triangular fundamental diagram, zero ramp inflow, and a free downstream boundary. Linear residual learning may not represent nonlinear congestion transitions.
+- **CTM evaluation alignment:** The original MATLAB RMSE calculation compares forecasts against current observations rather than the corresponding future observations. This is a scoring alignment issue; it does not by itself establish that forecast generation is incorrect. Python CTM export timestamps and station labels also require verification before a controlled comparison.
+- **Reproducibility and provenance:** Saved notebooks and input CSVs support inspection of the original results, but the missing training-export procedure leaves CTM input provenance unresolved. Supplementary reconstruction artifacts, original data extraction details, and complete automated horizon experiments remain to be included.
+- **Temporal validation and consistency:** Preprocessing is fitted before cross-validation rather than within each fold, shifted targets are not purged at fold boundaries, and elapsed horizons are not enforced across gaps. Python and MATLAB also use slightly different mph-to-km/h conversions. Future evaluation should resolve these issues and compare all models on identical station/target pairs.
+- **Scope:** A small detector extract and short temporal holdout limit conclusions. CTM's simplified traffic assumptions and linear residual correction may not capture all congestion dynamics. Additional roads, seasons, and traffic regimes are needed to assess generalization.
 
-Before further scientific claims, verify CTM export station identities and target timestamps, score all models on identical origins and targets, use consistent speed conversion, enforce actual elapsed horizons, and fit preprocessing within each CV fold with target-time purging. Future work could automate horizon sweeps and investigate additional datasets or nonlinear residual models. These are proposed extensions, not implemented functionality.
-
-## Technologies
-
-Python, JupyterLab, NumPy, pandas, scikit-learn (`Ridge`, `StandardScaler`, MSE), Matplotlib, seaborn, and MATLAB with Optimization Toolbox. SciPy and notebook/kernel packages are also pinned in the existing requirements. The research combines numerical traffic modeling, temporal feature construction, regularized regression, chronological validation, and station-level error analysis.
+The study illustrates the potential of combining traffic physics with learned corrections, with a flow-versus-speed tradeoff in the original comparison. Recovering export provenance and completing aligned evaluation are the next steps toward stronger experimental conclusions.
