@@ -1,247 +1,41 @@
-# CTM
+# Python notebooks: TRR and CTM residual learning
 
-To run the CTM code go into the folder MATLAB Code CTM and read the README.md there.
+Read the [project overview](../README.md) and [research audit](../docs/RESEARCH_AUDIT.md) before interpreting the saved results. These notebooks preserve the original experiment code and outputs; added Markdown explains methodology and known limitations.
 
-# Hybrid CTM–Ridge Traffic Modeling
+## Inputs and working directory
 
-This repository contains the code and data pipeline used to compare a physics-based Cell Transmission Model (CTM), a Temporal Ridge Regression (TRR) model, and a hybrid CTM-ridge residual-learning model for short-term traffic forecasting on the US-101 detector dataset.
+Run Jupyter from this directory. Both notebooks read `train_split_for_ctm.csv` and `test_split_for_ctm.csv`. The hybrid additionally reads `ctm_outputs__train_forResiduals.csv` and `ctm_outputs_test_D6_forResiduals.csv`. D1 and D3 test exports are included, but selecting a different horizon also requires verifying training-export semantics and all timestamp alignment.
 
-## What this project does
+The detector files contain raw mph speeds and veh/h flow. Python multiplies speed by 1.6; CTM exports use the MATLAB convention of 1.60934. Six lags include lag 0, giving five previous rows plus the current observation. `DELTA = 6` shifts targets six rows ahead, nominally 30 minutes, with exceptions across gaps. Older inline comments and the original [FAQ](FAQ_revised.docx) overstate continuous sampling and validation isolation; the audit supersedes those interpretations.
 
-The pipeline supports three main modeling tasks:
+## Environment and execution
 
-1. **Temporal Ridge Regression (TRR)**
-   - Builds a wide spatiotemporal feature matrix from lagged flow and speed values across all five stations.
-   - Trains separate ridge regression models for future flow and future speed.
-   - Uses rolling time-series cross-validation to tune the ridge regularization parameter.
-
-2. **Hybrid CTM-Ridge Residual Learning**
-   - Uses CTM outputs as a physics-based baseline forecast.
-   - Computes residuals between the true targets and CTM predictions.
-   - Trains ridge regression models to predict residual corrections.
-   - Forms the hybrid forecast as:
-     - `hybrid = CTM + learned residual`
-
-3. **Evaluation and Visualization**
-   - Reports mean per-station RMSE values.
-   - Produces per-station comparisons and forecast plots.
-
-## Data and unit conventions
-
-- The raw detector speed data in the train/test CSV files are recorded in **mph**.
-- Before TRR training and evaluation, the notebook converts speed to **km/h** by multiplying by `1.6`.
-- The CTM outputs used for hybrid residual learning are also in **km/h**.
-- Therefore, the final reported TRR and hybrid speed results are in **km/h**.
-- Flow is reported in **veh/h**.
-
-## Expected files
-
-Place the following files in the same directory as the notebook unless you modify the file paths in the code:
-
-### Required train/test detector data
-- `train_split_for_ctm.csv`
-- `test_split_for_ctm.csv`
-
-### Required CTM outputs for hybrid modeling
-- `ctm_outputs__train_forResiduals.csv`
-- `ctm_outputs_test_D6_forResiduals.csv`
-
-### Optional CTM outputs for other horizons in hybrid modeling
-- `ctm_outputs_test_D1_forResiduals.csv`
-- `ctm_outputs_test_D3_forResiduals.csv`
-
-## Notebook
-In the commands below, replace:
-
-- `AItrafficFlowHybrid.ipynb`
-
-with 
-- `AItrafficFlowTRR.ipynb`
-
-if you desire to run the temporal ridge regression notebook.
-
-## Recreating the Python virtual environment
-
-This project was developed in a Python virtual environment. The environment can be recreated from `requirements.txt`.
-
-### 1. Create the virtual environment
-
-On macOS/Linux:
+From the repository root:
 
 ```bash
 python3.12 -m venv .venv
-```
-
-If `python3.12` is not available, use:
-
-```bash
-python -m venv .venv
-```
-
-### 2. Activate the virtual environment
-
-On macOS/Linux:
-
-```bash
 source .venv/bin/activate
+python -m pip install -r TRR_Hybrid_models_code/requirements.txt
+cd TRR_Hybrid_models_code
+jupyter lab
 ```
 
-On Windows PowerShell:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-### 3. Install dependencies
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. (Optional) Register the environment as a Jupyter kernel
+On Windows PowerShell use `.venv\Scripts\Activate.ps1`. Choose the environment’s Python kernel. Optional kernel registration, from the activated environment:
 
 ```bash
 python -m ipykernel install --user --name traffic-modeling --display-name "Python (traffic-modeling)"
 ```
 
-## How to run the pipeline
-
-### Option A — Run interactively in Jupyter
-
-Launch Jupyter Lab:
+Open [AItrafficFlowTRR.ipynb](AItrafficFlowTRR.ipynb) for the standalone model and persistence baseline or [AItrafficFlowHybrid.ipynb](AItrafficFlowHybrid.ipynb) for residual learning followed by standalone comparisons. Run top to bottom when intentionally reproducing experiments. To save a separate executed copy from this directory:
 
 ```bash
-jupyter lab
+jupyter nbconvert --to notebook --execute AItrafficFlowTRR.ipynb --output AItrafficFlowTRR.executed.ipynb --ExecutePreprocessor.timeout=-1
 ```
 
-Then open the final notebook and run the cells from top to bottom.
+Replace both notebook names for a hybrid execution. Execution can take time; no notebooks were rerun during the documentation update. The existing pinned requirements were retained and have not been verified in a fresh environment.
 
-### Option B — Execute the notebook from the command line
+## Reading the experiments
 
-```bash
-jupyter nbconvert --to notebook --execute AItrafficFlowHybrid.ipynb \
-  --output AItrafficFlowHybrid.executed.ipynb \
-  --ExecutePreprocessor.timeout=-1
-```
+Both notebooks load data, construct station-wide lag features, standardize them, tune ridge penalties with four expanding date folds, fit final models and evaluate per-station RMSE. The hybrid first intersects supplied CTM timestamps with feature indices, learns flow and speed residuals, then adds predicted residuals back to CTM values.
 
-This executes the notebook end-to-end and saves an executed copy.
-
-## Pipeline order inside the notebook
-
-The notebook should be run in the following order:
-
-1. **Imports and configuration**
-   - Sets `K_LAGS`, `DELTA`, and file paths.
-
-2. **Load detector train/test data**
-   - Reads `train_split_for_ctm.csv` and `test_split_for_ctm.csv`.
-   - Converts raw speed from mph to km/h.
-
-3. **Preprocessing**
-   - Keeps the required columns.
-   - Drops rows with missing flow/speed values.
-
-4. **Construct wide spatiotemporal features**
-   - Preserves station order from the training file.
-   - Creates lagged flow and speed features across all stations.
-   - Builds target matrices for flow and speed.
-
-5. **Scale features**
-   - Standardizes the TRR input matrix using training-data statistics only.
-
-6. **Build rolling cross-validation folds**
-   - Uses expanding-window time-series CV.
-
-7. **Train and evaluate baseline TRR**
-   - Tune `lambda` for flow and speed separately.
-   - Train final ridge models.
-   - Predict on the test set.
-   - Compute per-station and average RMSE.
-
-8. **Load CTM outputs and align timestamps**
-   - Load the CTM train and test forecast files.
-   - Align on the timestamps common to both CTM outputs and TRR targets.
-
-9. **Train and evaluate the hybrid model**
-   - Compute residual targets.
-   - Tune residual ridge models for flow and speed.
-   - Predict residuals and reconstruct the hybrid forecast.
-   - Compute per-station and average RMSE.
-
-10. **Generate plots/tables**
-   - Per-station TRR vs hybrid comparisons.
-   - Ground truth vs model forecast plots.
-
-## Key parameters
-
-The main parameters in the notebook are:
-
-- `K_LAGS = 6`
-  - Uses 30 minutes of lag history at 5-minute resolution.
-- `DELTA = 6`
-  - Corresponds to a 30-minute-ahead forecast horizon.
-
-If you change `DELTA`, make sure the matching CTM forecast files and downstream evaluation logic also correspond to that horizon.
-
-## Expected outputs
-
-Running the final notebook should produce:
-
-- Baseline TRR flow and speed RMSE values
-- Hybrid flow and speed RMSE values
-- Per-station RMSE comparisons
-- Plots comparing:
-  - ground truth vs TRR
-  - ground truth vs hybrid
-  - RMSE across models/horizons (if included)
-
-## Recommended project structure
-
-A simple layout is:
-
-```text
-project/
-├── AItrafficFlowHybrid.ipynb
-├── AItrafficFlowTRR.ipynb
-├── README.md
-├── requirements.txt
-├── FAQ_revised.docx
-├── train_split_for_ctm.csv
-├── test_split_for_ctm.csv
-├── ctm_outputs__train_forResiduals.csv
-├── ctm_outputs_test_D1_forResiduals.csv
-├── ctm_outputs_test_D3_forResiduals.csv
-├── ctm_outputs_test_D6_forResiduals.csv
-└── figures/
-```
-
-## Troubleshooting
-
-### File not found
-If the notebook cannot find input files, verify that:
-- the CSV files are in the same folder as the notebook, or
-- the file path variables at the top of the notebook were updated correctly.
-
-### Unit confusion
-If speed results look inconsistent:
-- verify whether speed conversion from mph to km/h is active,
-- verify that the CTM speed outputs used for residual learning are also in km/h,
-- ensure the paper/report labels final speed RMSE values in km/h.
-
-### Metric inconsistencies
-If a table and the surrounding text disagree, make sure all reported values come from the same final notebook run. This project uses **mean per-station RMSE** unless otherwise noted.
-
-### Hybrid alignment issues
-If the hybrid block throws indexing errors, confirm that:
-- CTM outputs were loaded correctly,
-- datetime columns were parsed correctly,
-- train/test alignment is performed using the timestamp intersection before residual computation.
-
-## Citation / reporting note
-
-When documenting results from the final notebook:
-- report **flow RMSE in veh/h**,
-- report **speed RMSE in km/h**,
-- clearly state that raw speed was originally recorded in mph and converted before modeling.
-
+Final results average per-station RMSE; CV instead uses pooled station MSE before taking its square root. The standalone test has 837 origins and the hybrid has 833. Timestamp intersections do not resolve forecast-origin versus target-time semantics. The hybrid trajectory plot uses standalone predictions despite its legend. Horizon plots contain manually entered arrays. Refer to the root results table for qualified numerical reporting; do not infer a controlled hybrid improvement from the merged table.

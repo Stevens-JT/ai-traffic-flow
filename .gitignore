@@ -1,0 +1,15 @@
+# Generated notebook, Python and environment files
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.executed.ipynb
+*.tmp
+*.temp
+*~
+.DS_Store
